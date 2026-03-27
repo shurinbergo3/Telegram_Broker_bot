@@ -1,0 +1,21 @@
+{
+  "users": [
+    {
+      "id": "552922805",
+      "username": "sumotry",
+      "firstSeen": "2026-03-26T17:55:48.973Z"
+    },
+    {
+      "id": "313183434",
+      "username": "avbiz",
+      "firstSeen": "2026-03-27T11:57:09.793Z"
+    }
+  ],
+  "analysesCount": 8,
+  "admins": [
+    {
+      "id": "313183434",
+      "username": null
+    }
+  ]
+}
