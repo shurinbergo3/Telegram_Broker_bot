@@ -275,7 +275,7 @@ async function analyzeGroupMessage(ctx, msg) {
 
 // --- Utility commands (must be before bot.on('text') to not be intercepted) ---
 
-bot.command('myid', (ctx) => ctx.reply(`Твой ID: ${ctx.from.id}`));
+bot.command('myid', (ctx) => ctx.reply(`Chat ID: ${ctx.chat.id}\nТвой ID: ${ctx.from.id}`));
 
 // --- Main text handler (regular group messages, including from bots) ---
 
