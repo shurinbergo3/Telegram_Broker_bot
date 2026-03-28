@@ -243,6 +243,15 @@ async function analyzeGroupMessage(ctx, msg) {
   const inn = (INN_EXTRACT.exec(text) || [])[1] || null;
   const company = (COMPANY_EXTRACT.exec(text.trim()) || [])[1]?.trim() || null;
 
+  // Status "Ядро" — skip AI, reply immediately
+  if (/Статус\s*:?\s*ядро/i.test(text)) {
+    const label = company && inn ? `${company}, ${inn}` : inn || company || '?';
+    const reply = `🎯 Для [${label}] Покупателей не найдено. Рекомендую отправить в рекламу.`;
+    addLog({ type: 'no_buyers', inn, company, summary: 'Статус: Ядро — без анализа' });
+    await ctx.reply(reply, { reply_to_message_id: msg.message_id });
+    return;
+  }
+
   try {
     const reply = await analyzeWithGemini(text);
     db.incrementAnalyses();
