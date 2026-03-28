@@ -165,10 +165,10 @@ bot.action('admin_edit_prompt', async (ctx) => {
   await ctx.answerCbQuery();
   const current = db.getPromptTemplate();
   awaitingPromptInput.add(String(ctx.from.id));
-  const MAX = 3800;
-  const preview = current.length > MAX ? current.slice(0, MAX) + '\n...[обрезано]' : current;
-  await ctx.reply(`📝 Текущий промпт:\n\n${preview}`);
-  await ctx.reply('Отправь новый текст промпта. Используй {{TODAY}} как плейсхолдер для текущей даты.\n\nДля отмены напиши /cancel.');
+  const buf = Buffer.from(current, 'utf8');
+  await ctx.replyWithDocument({ source: buf, filename: 'prompt.txt' }, {
+    caption: '📝 Текущий промпт (полный). Скачай, отредактируй и отправь обратно .txt файлом.\n\nДля отмены напиши /cancel.',
+  });
 });
 
 bot.action('admin_logs', async (ctx) => {
@@ -277,6 +277,26 @@ async function analyzeGroupMessage(ctx, msg) {
 
 bot.command('myid', (ctx) => ctx.reply(`Chat ID: ${ctx.chat.id}\nТвой ID: ${ctx.from.id}`));
 
+// --- Document handler: accept .txt file as new prompt ---
+
+bot.on('document', async (ctx) => {
+  const userId = String(ctx.from?.id);
+  if (!isAdmin(ctx) || !awaitingPromptInput.has(userId)) return;
+
+  const doc = ctx.message.document;
+  if (!doc.mime_type?.includes('text') && !doc.file_name?.endsWith('.txt')) {
+    await ctx.reply('Нужен .txt файл. Попробуй ещё раз или /cancel.');
+    return;
+  }
+
+  awaitingPromptInput.delete(userId);
+  const fileLink = await ctx.telegram.getFileLink(doc.file_id);
+  const res = await fetch(fileLink.href);
+  const newPrompt = await res.text();
+  db.savePromptTemplate(newPrompt);
+  await ctx.reply(`✅ Промпт обновлен (${newPrompt.length} символов).`);
+});
+
 // --- Main text handler (regular group messages, including from bots) ---
 
 bot.on('text', async (ctx) => {
@@ -285,12 +305,10 @@ bot.on('text', async (ctx) => {
 
   if (!text) return;
 
-  // Admin: awaiting new prompt text
+  // Admin: awaiting prompt — remind to send a file
   if (isAdmin(ctx) && awaitingPromptInput.has(userId)) {
     if (text.startsWith('/')) return;
-    awaitingPromptInput.delete(userId);
-    db.savePromptTemplate(text);
-    await ctx.reply('Промпт обновлен и сохранен.');
+    await ctx.reply('Пожалуйста, отправь промпт как .txt файл, а не текстом. Или /cancel для отмены.');
     return;
   }
 
