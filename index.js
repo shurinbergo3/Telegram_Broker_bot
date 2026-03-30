@@ -349,7 +349,8 @@ bot.catch((err, ctx) => {
 
 // --- Launch ---
 
-bot.launch()
+bot.telegram.deleteWebhook({ drop_pending_updates: false })
+  .then(() => bot.launch())
   .catch((err) => {
     console.error('Failed to start bot:', err.message);
     process.exit(1);
