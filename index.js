@@ -331,6 +331,8 @@ bot.on('text', async (ctx) => {
 
 // Photo messages — read caption as text, ignore the image
 bot.on('photo', async (ctx) => {
+  const userId = String(ctx.from?.id);
+  if (awaitingPromptInput.has(userId) || awaitingNewAdmin.has(userId)) return;
   await analyzeGroupMessage(ctx, ctx.message);
 });
 
