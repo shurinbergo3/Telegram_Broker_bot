@@ -230,7 +230,7 @@ async function analyzeGroupMessage(ctx, msg) {
   const chatId = String(msg.chat?.id ?? ctx.chat?.id);
   if (chatId !== TARGET_GROUP_ID) return;
 
-  const text = msg.text;
+  const text = msg.text || msg.caption;
   if (!text || text.startsWith('/')) return;
 
   // Only process messages that look like company listings
@@ -326,6 +326,11 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  await analyzeGroupMessage(ctx, ctx.message);
+});
+
+// Photo messages — read caption as text, ignore the image
+bot.on('photo', async (ctx) => {
   await analyzeGroupMessage(ctx, ctx.message);
 });
 
