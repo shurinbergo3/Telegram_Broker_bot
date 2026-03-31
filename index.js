@@ -256,7 +256,9 @@ async function analyzeGroupMessage(ctx, msg) {
   }
 
   try {
+    console.log(`[AI] Calling Gemini for INN=${inn}...`);
     const reply = await analyzeWithGemini(text);
+    console.log(`[AI] Gemini OK, reply len=${reply.length}, preview=${reply.slice(0, 80)}`);
     db.incrementAnalyses();
 
     const noBuyers = /покупател\w*\s+не\s+найден|не\s+найден\w*\s+покупател/i.test(reply);
@@ -269,9 +271,12 @@ async function analyzeGroupMessage(ctx, msg) {
       summary: firstLine.slice(0, 100),
     });
 
+    console.log(`[REPLY] Sending reply to msg ${msg.message_id}...`);
     await ctx.reply(reply, { reply_to_message_id: msg.message_id });
+    console.log(`[REPLY] Sent OK`);
   } catch (err) {
-    console.error('AI error:', err.message);
+    console.error(`[ERROR] ${err.name}: ${err.message}`);
+    console.error(err.stack);
     addLog({ type: 'error', inn, company, summary: err.message.slice(0, 100) });
   }
 }
