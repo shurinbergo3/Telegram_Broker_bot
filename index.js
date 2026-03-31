@@ -349,14 +349,27 @@ bot.catch((err, ctx) => {
 
 // --- Launch ---
 
-bot.telegram.deleteWebhook({ drop_pending_updates: false })
-  .then(() => bot.launch())
-  .catch((err) => {
-    console.error('Failed to start bot:', err.message);
-    process.exit(1);
-  });
+async function startBot(retries = 10, delay = 3000) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+      await bot.launch({ allowedUpdates: ['message', 'channel_post', 'callback_query'] });
+      console.log(`Bot started (attempt ${i}). Group: ${TARGET_GROUP_ID} | Admin: ${ADMIN_USER_ID}`);
+      return;
+    } catch (err) {
+      console.error(`Attempt ${i}/${retries} failed: ${err.message}`);
+      if (i < retries) {
+        const wait = delay * i;
+        console.log(`Waiting ${wait / 1000}s before retry...`);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+  }
+  console.error('All retry attempts exhausted. Exiting.');
+  process.exit(1);
+}
 
-console.log(`Bot started. Group: ${TARGET_GROUP_ID} | Admin: ${ADMIN_USER_ID}`);
+startBot();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
