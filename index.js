@@ -228,13 +228,16 @@ const COMPANY_EXTRACT = /^([А-ЯЁа-яёA-Za-z0-9«»"'\-\s]{1,40})/;
 
 async function analyzeGroupMessage(ctx, msg) {
   const chatId = String(msg.chat?.id ?? ctx.chat?.id);
+  console.log(`[MSG] chatId=${chatId} target=${TARGET_GROUP_ID} match=${chatId === TARGET_GROUP_ID} from=${msg.from?.username || msg.from?.id} isBot=${msg.from?.is_bot}`);
   if (chatId !== TARGET_GROUP_ID) return;
 
   const text = msg.text || msg.caption;
+  console.log(`[MSG] hasText=${!!text} len=${text?.length || 0} preview=${(text || '').slice(0, 60)}`);
   if (!text || text.startsWith('/')) return;
 
-  // Only process messages that look like company listings
-  if (!APPLICATION_PATTERN.test(text)) return;
+  const hasInn = APPLICATION_PATTERN.test(text);
+  console.log(`[MSG] hasINN=${hasInn}`);
+  if (!hasInn) return;
 
   if (!msg.from?.is_bot) {
     db.upsertUser(String(msg.from?.id), msg.from?.username);
@@ -300,6 +303,7 @@ bot.on('document', async (ctx) => {
 // --- Main text handler (regular group messages, including from bots) ---
 
 bot.on('text', async (ctx) => {
+  console.log(`[HANDLER:text] chat=${ctx.chat?.id} from=${ctx.from?.username || ctx.from?.id}`);
   const userId = String(ctx.from?.id);
   const text = ctx.message.text;
 
@@ -331,6 +335,7 @@ bot.on('text', async (ctx) => {
 
 // Photo messages — read caption as text, ignore the image
 bot.on('photo', async (ctx) => {
+  console.log(`[HANDLER:photo] chat=${ctx.chat?.id} from=${ctx.from?.username || ctx.from?.id} caption=${!!ctx.message?.caption}`);
   const userId = String(ctx.from?.id);
   if (awaitingPromptInput.has(userId) || awaitingNewAdmin.has(userId)) return;
   await analyzeGroupMessage(ctx, ctx.message);
@@ -338,6 +343,7 @@ bot.on('photo', async (ctx) => {
 
 // Channel posts (when the group is linked to a Telegram channel)
 bot.on('channel_post', async (ctx) => {
+  console.log(`[HANDLER:channel_post] chat=${ctx.channelPost?.chat?.id} hasText=${!!ctx.channelPost?.text} hasCaption=${!!ctx.channelPost?.caption}`);
   await analyzeGroupMessage(ctx, ctx.channelPost);
 });
 
