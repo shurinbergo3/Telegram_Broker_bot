@@ -1,9 +1,10 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const express = require('express');
 const db = require('./db');
 
-const { TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID, AI_MODEL } = process.env;
+const { TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID, AI_MODEL, WEBHOOK_SECRET, PORT } = process.env;
 
 if (!TELEGRAM_BOT_TOKEN || !GEMINI_API_KEY || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
   console.error('Missing required env vars: TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID');
@@ -358,6 +359,66 @@ bot.catch((err, ctx) => {
   console.error(`Error for update ${ctx?.update?.update_id}:`, err.message);
 });
 
+// --- Incoming webhook from external bot ---
+
+async function handleIncomingWebhook(text, messageId) {
+  const hasInn = APPLICATION_PATTERN.test(text);
+  console.log(`[WEBHOOK] messageId=${messageId} hasINN=${hasInn} preview=${text.slice(0, 60)}`);
+  if (!hasInn) return;
+
+  const inn = (INN_EXTRACT.exec(text) || [])[1] || null;
+  const company = (COMPANY_EXTRACT.exec(text.trim()) || [])[1]?.trim() || null;
+
+  if (/Статус\s*:?\s*ядро/i.test(text)) {
+    const label = company && inn ? `${company}, ${inn}` : inn || company || '?';
+    const reply = `🎯 Для [${label}] Покупателей не найдено. Рекомендую отправить в рекламу.`;
+    addLog({ type: 'no_buyers', inn, company, summary: 'Статус: Ядро — без анализа' });
+    await bot.telegram.sendMessage(TARGET_GROUP_ID, reply, { reply_to_message_id: messageId });
+    return;
+  }
+
+  try {
+    console.log(`[WEBHOOK/AI] Calling Gemini for INN=${inn}...`);
+    const reply = await analyzeWithGemini(text);
+    console.log(`[WEBHOOK/AI] Gemini OK, len=${reply.length}`);
+    db.incrementAnalyses();
+
+    const noBuyers = /покупател\w*\s+не\s+найден|не\s+найден\w*\s+покупател/i.test(reply);
+    const firstLine = reply.split('\n').find((l) => l.trim()) || reply.slice(0, 80);
+    addLog({ type: noBuyers ? 'no_buyers' : 'found', inn, company, summary: firstLine.slice(0, 100) });
+
+    await bot.telegram.sendMessage(TARGET_GROUP_ID, reply, { reply_to_message_id: messageId });
+    console.log(`[WEBHOOK/REPLY] Sent OK`);
+  } catch (err) {
+    console.error(`[WEBHOOK/ERROR] ${err.name}: ${err.message}`);
+    addLog({ type: 'error', inn, company, summary: err.message.slice(0, 100) });
+  }
+}
+
+function startHttpServer() {
+  const app = express();
+  app.use(express.json());
+
+  app.post('/incoming', async (req, res) => {
+    const secret = req.headers['x-secret'];
+    if (!WEBHOOK_SECRET || secret !== WEBHOOK_SECRET) {
+      console.warn('[WEBHOOK] Unauthorized request');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { text, messageId } = req.body;
+    if (!text || !messageId) {
+      return res.status(400).json({ error: 'text and messageId are required' });
+    }
+
+    res.json({ ok: true });
+    handleIncomingWebhook(String(text), Number(messageId)).catch(console.error);
+  });
+
+  const port = Number(PORT) || 3001;
+  app.listen(port, () => console.log(`[HTTP] Webhook server listening on port ${port}`));
+}
+
 // --- Launch ---
 
 async function startBot(retries = 10, delay = 3000) {
@@ -381,6 +442,7 @@ async function startBot(retries = 10, delay = 3000) {
 }
 
 startBot();
+startHttpServer();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
