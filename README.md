@@ -1,6 +1,6 @@
 # Bizwell Sell Bot
 
-A Telegram bot that monitors a designated group for Russian company listings (identified by INN), analyzes them against a buyer database using Google Gemini AI, and automatically replies with matching buyers or a "no buyers found" verdict.
+A Telegram bot that monitors a designated group for company listings (identified by INN), analyzes them against a buyer database using Google Gemini AI, and automatically replies with matching buyers or a "no buyers found" verdict.
 
 ## How It Works
 
