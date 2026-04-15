@@ -1,6 +1,4 @@
 require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 if (process.env.HTTPS_PROXY) {
   const nodeFetch = require('node-fetch');
@@ -9,6 +7,9 @@ if (process.env.HTTPS_PROXY) {
   globalThis.fetch = (url, init = {}) => nodeFetch(url, { ...init, agent: proxyAgent });
   console.log(`[PROXY] Using proxy: ${process.env.HTTPS_PROXY}`);
 }
+
+const { Telegraf, Markup } = require('telegraf');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const express = require('express');
 const db = require('./db');
 
