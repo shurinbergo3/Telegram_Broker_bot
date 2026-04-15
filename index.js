@@ -1,27 +1,19 @@
 require('dotenv').config();
 
-if (process.env.HTTPS_PROXY) {
-  const nodeFetch = require('node-fetch');
-  const { HttpsProxyAgent } = require('https-proxy-agent');
-  const proxyAgent = new HttpsProxyAgent(process.env.HTTPS_PROXY);
-  globalThis.fetch = (url, init = {}) => nodeFetch(url, { ...init, agent: proxyAgent });
-  console.log(`[PROXY] Using proxy: ${process.env.HTTPS_PROXY}`);
-}
-
 const { Telegraf, Markup } = require('telegraf');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const express = require('express');
 const db = require('./db');
 
-const { TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID, AI_MODEL, WEBHOOK_SECRET, PORT } = process.env;
+const { TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID, AI_MODEL, WEBHOOK_SECRET, PORT } = process.env;
 
-if (!TELEGRAM_BOT_TOKEN || !GEMINI_API_KEY || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
-  console.error('Missing required env vars: TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID');
+if (!TELEGRAM_BOT_TOKEN || !GROQ_API_KEY || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
+  console.error('Missing required env vars: TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID');
   process.exit(1);
 }
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const groq = new Groq({ apiKey: GROQ_API_KEY });
 
 const TARGET_GROUP_ID = String(TELEGRAM_GROUP_ID);
 const ADMIN_USER_ID = String(ADMIN_ID);
@@ -71,12 +63,14 @@ function buildSystemPrompt() {
 }
 
 async function analyzeWithGemini(text) {
-  const model = genAI.getGenerativeModel({
-    model: AI_MODEL || 'gemini-3.1-flash-lite-preview',
-    systemInstruction: buildSystemPrompt(),
+  const completion = await groq.chat.completions.create({
+    model: AI_MODEL || 'llama-3.3-70b-versatile',
+    messages: [
+      { role: 'system', content: buildSystemPrompt() },
+      { role: 'user', content: text },
+    ],
   });
-  const result = await model.generateContent(text);
-  return result.response.text();
+  return completion.choices[0].message.content;
 }
 
 function isAdmin(ctx) {
