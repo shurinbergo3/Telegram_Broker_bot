@@ -2,10 +2,11 @@ require('dotenv').config();
 
 const { Telegraf, Markup } = require('telegraf');
 const Groq = require('groq-sdk');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const express = require('express');
 const db = require('./db');
 
-const { TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID, AI_MODEL, WEBHOOK_SECRET, PORT } = process.env;
+const { TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID, AI_MODEL, WEBHOOK_SECRET, PORT, HTTPS_PROXY } = process.env;
 
 if (!TELEGRAM_BOT_TOKEN || !GROQ_API_KEY || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
   console.error('Missing required env vars: TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID');
@@ -13,7 +14,12 @@ if (!TELEGRAM_BOT_TOKEN || !GROQ_API_KEY || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
 }
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-const groq = new Groq({ apiKey: GROQ_API_KEY });
+const groqOptions = { apiKey: GROQ_API_KEY };
+if (HTTPS_PROXY) {
+  groqOptions.httpAgent = new HttpsProxyAgent(HTTPS_PROXY);
+  console.log(`[PROXY] Groq using proxy: ${HTTPS_PROXY}`);
+}
+const groq = new Groq(groqOptions);
 
 const TARGET_GROUP_ID = String(TELEGRAM_GROUP_ID);
 const ADMIN_USER_ID = String(ADMIN_ID);
