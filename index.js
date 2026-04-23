@@ -473,8 +473,21 @@ async function startBot(retries = 10, delay = 3000) {
   process.exit(1);
 }
 
-startBot();
-startHttpServer();
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? `${reason.name}: ${reason.message}\n${reason.stack}` : String(reason);
+  console.error(`[CRASH] Unhandled rejection: ${msg}`);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error(`[CRASH] Uncaught exception: ${err.name}: ${err.message}\n${err.stack}`);
+});
+
+startBot().catch((err) => console.error(`[CRASH] startBot threw: ${err.message}`));
+try {
+  startHttpServer();
+} catch (err) {
+  console.error(`[CRASH] startHttpServer threw: ${err.message}`);
+}
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
