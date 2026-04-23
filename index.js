@@ -141,6 +141,10 @@ function formatUsersList(users) {
 
 bot.command('admin', async (ctx) => {
   if (!isAdmin(ctx)) return;
+  if (ctx.chat?.type !== 'private') {
+    await ctx.reply('Панель администратора доступна только в личных сообщениях с ботом.');
+    return;
+  }
   await ctx.reply('Панель администратора:', adminMenu(ctx));
 });
 
@@ -222,6 +226,7 @@ bot.action(/^admin_remove_(.+)$/, async (ctx) => {
 
 bot.command('cancel', async (ctx) => {
   if (!isAdmin(ctx)) return;
+  if (ctx.chat?.type !== 'private') return;
   const uid = String(ctx.from.id);
   if (awaitingPromptInput.has(uid) || awaitingNewAdmin.has(uid)) {
     awaitingPromptInput.delete(uid);
@@ -298,41 +303,58 @@ bot.command('myid', (ctx) => ctx.reply(`Chat ID: ${ctx.chat.id}\nТвой ID: ${
 // --- Document handler: accept .txt file as new prompt ---
 
 bot.on('document', async (ctx) => {
+  if (ctx.chat?.type !== 'private') return;
   const userId = String(ctx.from?.id);
   if (!isAdmin(ctx) || !awaitingPromptInput.has(userId)) return;
 
   const doc = ctx.message.document;
+  console.log(`[PROMPT_UPLOAD] user=${userId} file=${doc.file_name} size=${doc.file_size} mime=${doc.mime_type}`);
+
   if (!doc.mime_type?.includes('text') && !doc.file_name?.endsWith('.txt')) {
     await ctx.reply('Нужен .txt файл. Попробуй ещё раз или /cancel.');
     return;
   }
 
-  awaitingPromptInput.delete(userId);
-  const fileLink = await ctx.telegram.getFileLink(doc.file_id);
-  const res = await fetch(fileLink.href);
-  const newPrompt = await res.text();
-  db.savePromptTemplate(newPrompt);
-  await ctx.reply(`✅ Промпт обновлен (${newPrompt.length} символов).`);
+  try {
+    const fileLink = await ctx.telegram.getFileLink(doc.file_id);
+    console.log(`[PROMPT_UPLOAD] downloading ${fileLink.href}`);
+    const res = await fetch(fileLink.href);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const newPrompt = await res.text();
+    if (!newPrompt || newPrompt.trim().length === 0) {
+      await ctx.reply('❌ Файл пустой. Попробуй ещё раз или /cancel.');
+      return;
+    }
+    db.savePromptTemplate(newPrompt);
+    awaitingPromptInput.delete(userId);
+    console.log(`[PROMPT_UPLOAD] saved ${newPrompt.length} chars`);
+    await ctx.reply(`✅ Промпт обновлен (${newPrompt.length} символов).`);
+  } catch (err) {
+    console.error(`[PROMPT_UPLOAD] error: ${err.name}: ${err.message}`);
+    console.error(err.stack);
+    await ctx.reply(`❌ Не удалось загрузить промпт: ${err.message}\n\nПопробуй ещё раз или /cancel.`);
+  }
 });
 
 // --- Main text handler (regular group messages, including from bots) ---
 
 bot.on('text', async (ctx) => {
-  console.log(`[HANDLER:text] chat=${ctx.chat?.id} from=${ctx.from?.username || ctx.from?.id}`);
+  console.log(`[HANDLER:text] chat=${ctx.chat?.id} type=${ctx.chat?.type} from=${ctx.from?.username || ctx.from?.id}`);
   const userId = String(ctx.from?.id);
   const text = ctx.message.text;
 
   if (!text) return;
 
-  // Admin: awaiting prompt — remind to send a file
-  if (isAdmin(ctx) && awaitingPromptInput.has(userId)) {
+  const isPrivate = ctx.chat?.type === 'private';
+
+  // Admin flows only apply in private chat with the bot
+  if (isPrivate && isAdmin(ctx) && awaitingPromptInput.has(userId)) {
     if (text.startsWith('/')) return;
     await ctx.reply('Пожалуйста, отправь промпт как .txt файл, а не текстом. Или /cancel для отмены.');
     return;
   }
 
-  // Super admin: awaiting new admin ID
-  if (isSuperAdmin(ctx) && awaitingNewAdmin.has(userId)) {
+  if (isPrivate && isSuperAdmin(ctx) && awaitingNewAdmin.has(userId)) {
     if (text.startsWith('/')) return;
     awaitingNewAdmin.delete(userId);
     const newId = text.trim();
@@ -350,9 +372,10 @@ bot.on('text', async (ctx) => {
 
 // Photo messages — read caption as text, ignore the image
 bot.on('photo', async (ctx) => {
-  console.log(`[HANDLER:photo] chat=${ctx.chat?.id} from=${ctx.from?.username || ctx.from?.id} caption=${!!ctx.message?.caption}`);
+  console.log(`[HANDLER:photo] chat=${ctx.chat?.id} type=${ctx.chat?.type} from=${ctx.from?.username || ctx.from?.id} caption=${!!ctx.message?.caption}`);
   const userId = String(ctx.from?.id);
-  if (awaitingPromptInput.has(userId) || awaitingNewAdmin.has(userId)) return;
+  const isPrivate = ctx.chat?.type === 'private';
+  if (isPrivate && (awaitingPromptInput.has(userId) || awaitingNewAdmin.has(userId))) return;
   await analyzeGroupMessage(ctx, ctx.message);
 });
 
