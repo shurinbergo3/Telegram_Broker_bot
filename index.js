@@ -13,7 +13,12 @@ if (!TELEGRAM_BOT_TOKEN || !GROQ_API_KEY || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
   process.exit(1);
 }
 
-const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+const telegrafOptions = {};
+if (HTTPS_PROXY) {
+  telegrafOptions.telegram = { agent: new HttpsProxyAgent(HTTPS_PROXY) };
+  console.log(`[PROXY] Telegraf using proxy: ${HTTPS_PROXY}`);
+}
+const bot = new Telegraf(TELEGRAM_BOT_TOKEN, telegrafOptions);
 const groqOptions = { apiKey: GROQ_API_KEY };
 if (HTTPS_PROXY) {
   groqOptions.httpAgent = new HttpsProxyAgent(HTTPS_PROXY);
