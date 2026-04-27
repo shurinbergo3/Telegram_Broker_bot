@@ -5,11 +5,24 @@ const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 const DATA_FILE = path.join(__dirname, 'data.json');
 
 function readJSON(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    console.error(`[DB] Failed to read ${filePath}: ${err.message}`);
+    throw err;
+  }
 }
 
 function writeJSON(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  const tmp = filePath + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    console.error(`[DB] Failed to write ${filePath}: ${err.message}`);
+    throw err;
+  }
 }
 
 // --- Settings (prompt) ---

@@ -259,8 +259,8 @@ async function analyzeGroupMessage(ctx, msg) {
   console.log(`[MSG] hasINN=${hasInn}`);
   if (!hasInn) return;
 
-  if (!msg.from?.is_bot) {
-    db.upsertUser(String(msg.from?.id), msg.from?.username);
+  if (msg.from?.id && !msg.from?.is_bot) {
+    db.upsertUser(String(msg.from.id), msg.from.username);
   }
 
   const inn = (INN_EXTRACT.exec(text) || [])[1] || null;
