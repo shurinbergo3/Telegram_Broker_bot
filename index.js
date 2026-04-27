@@ -398,10 +398,28 @@ bot.catch((err, ctx) => {
 
 // --- Incoming webhook from external bot ---
 
+async function sendToGroup(text, messageId) {
+  try {
+    await bot.telegram.sendMessage(TARGET_GROUP_ID, text, { reply_to_message_id: messageId });
+    console.log(`[WEBHOOK/REPLY] Sent with reply_to=${messageId} OK`);
+  } catch (err) {
+    if (err.description?.includes('message to be replied not found') || err.description?.includes('reply message not found')) {
+      console.warn(`[WEBHOOK/REPLY] reply_to ${messageId} not found in group, sending without reply`);
+      await bot.telegram.sendMessage(TARGET_GROUP_ID, text);
+      console.log(`[WEBHOOK/REPLY] Sent without reply_to OK`);
+    } else {
+      throw err;
+    }
+  }
+}
+
 async function handleIncomingWebhook(text, messageId) {
   const hasInn = APPLICATION_PATTERN.test(text);
   console.log(`[WEBHOOK] messageId=${messageId} hasINN=${hasInn} preview=${text.slice(0, 60)}`);
-  if (!hasInn) return;
+  if (!hasInn) {
+    console.log(`[WEBHOOK] Skipped — no INN found in text`);
+    return;
+  }
 
   const inn = (INN_EXTRACT.exec(text) || [])[1] || null;
   const company = (COMPANY_EXTRACT.exec(text.trim()) || [])[1]?.trim() || null;
@@ -410,7 +428,7 @@ async function handleIncomingWebhook(text, messageId) {
     const label = company && inn ? `${company}, ${inn}` : inn || company || '?';
     const reply = `🎯 Для [${label}] Покупателей не найдено. Рекомендую отправить в рекламу.`;
     addLog({ type: 'no_buyers', inn, company, summary: 'Статус: Ядро — без анализа' });
-    await bot.telegram.sendMessage(TARGET_GROUP_ID, reply, { reply_to_message_id: messageId });
+    await sendToGroup(reply, messageId);
     return;
   }
 
@@ -424,8 +442,7 @@ async function handleIncomingWebhook(text, messageId) {
     const firstLine = reply.split('\n').find((l) => l.trim()) || reply.slice(0, 80);
     addLog({ type: noBuyers ? 'no_buyers' : 'found', inn, company, summary: firstLine.slice(0, 100) });
 
-    await bot.telegram.sendMessage(TARGET_GROUP_ID, reply, { reply_to_message_id: messageId });
-    console.log(`[WEBHOOK/REPLY] Sent OK`);
+    await sendToGroup(reply, messageId);
   } catch (err) {
     console.error(`[WEBHOOK/ERROR] ${err.name}: ${err.message}`);
     addLog({ type: 'error', inn, company, summary: err.message.slice(0, 100) });
@@ -444,12 +461,15 @@ function startHttpServer() {
     }
 
     const { text, messageId } = req.body;
+    console.log(`[WEBHOOK/IN] messageId=${messageId} textLen=${text?.length} hasText=${!!text} body=${JSON.stringify(req.body).slice(0, 120)}`);
     if (!text || !messageId) {
       return res.status(400).json({ error: 'text and messageId are required' });
     }
 
     res.json({ ok: true });
-    handleIncomingWebhook(String(text), Number(messageId)).catch(console.error);
+    handleIncomingWebhook(String(text), Number(messageId)).catch((err) => {
+      console.error(`[WEBHOOK/UNHANDLED] ${err.name}: ${err.message}`);
+    });
   });
 
   const port = Number(PORT) || 3001;
