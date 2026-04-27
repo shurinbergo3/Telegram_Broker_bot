@@ -14,12 +14,9 @@ function readJSON(filePath) {
 }
 
 function writeJSON(filePath, data) {
-  const tmp = filePath + '.tmp';
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tmp, filePath);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    try { fs.unlinkSync(tmp); } catch (_) {}
     console.error(`[DB] Failed to write ${filePath}: ${err.message}`);
     throw err;
   }

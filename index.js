@@ -279,7 +279,6 @@ async function analyzeGroupMessage(ctx, msg) {
     console.log(`[AI] Calling Gemini for INN=${inn}...`);
     const reply = await analyzeWithGemini(text);
     console.log(`[AI] Gemini OK, reply len=${reply.length}, preview=${reply.slice(0, 80)}`);
-    db.incrementAnalyses();
 
     const noBuyers = /покупател\w*\s+не\s+найден|не\s+найден\w*\s+покупател/i.test(reply);
     const firstLine = reply.split('\n').find((l) => l.trim()) || reply.slice(0, 80);
@@ -294,6 +293,7 @@ async function analyzeGroupMessage(ctx, msg) {
     console.log(`[REPLY] Sending reply to msg ${msg.message_id}...`);
     await ctx.reply(reply, { reply_to_message_id: msg.message_id });
     console.log(`[REPLY] Sent OK`);
+    try { db.incrementAnalyses(); } catch (e) { console.error(`[DB] incrementAnalyses: ${e.message}`); }
   } catch (err) {
     console.error(`[ERROR] ${err.name}: ${err.message}`);
     console.error(err.stack);
@@ -436,13 +436,13 @@ async function handleIncomingWebhook(text, messageId) {
     console.log(`[WEBHOOK/AI] Calling Gemini for INN=${inn}...`);
     const reply = await analyzeWithGemini(text);
     console.log(`[WEBHOOK/AI] Gemini OK, len=${reply.length}`);
-    db.incrementAnalyses();
 
     const noBuyers = /покупател\w*\s+не\s+найден|не\s+найден\w*\s+покупател/i.test(reply);
     const firstLine = reply.split('\n').find((l) => l.trim()) || reply.slice(0, 80);
     addLog({ type: noBuyers ? 'no_buyers' : 'found', inn, company, summary: firstLine.slice(0, 100) });
 
     await sendToGroup(reply, messageId);
+    try { db.incrementAnalyses(); } catch (e) { console.error(`[DB] incrementAnalyses: ${e.message}`); }
   } catch (err) {
     console.error(`[WEBHOOK/ERROR] ${err.name}: ${err.message}`);
     addLog({ type: 'error', inn, company, summary: err.message.slice(0, 100) });
