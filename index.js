@@ -1,30 +1,35 @@
 require('dotenv').config();
 
 const { Telegraf, Markup } = require('telegraf');
-const Groq = require('groq-sdk');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const express = require('express');
 const db = require('./db');
+const providers = require('./providers');
 
-const { TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID, AI_MODEL, WEBHOOK_SECRET, PORT, HTTPS_PROXY } = process.env;
+const { TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_ID, ADMIN_ID, WEBHOOK_SECRET, PORT, HTTPS_PROXY } = process.env;
 
-if (!TELEGRAM_BOT_TOKEN || !GROQ_API_KEY || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
-  console.error('Missing required env vars: TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_GROUP_ID, ADMIN_ID');
+if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_GROUP_ID || !ADMIN_ID) {
+  console.error('Missing required env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_ID, ADMIN_ID');
   process.exit(1);
 }
 
-const telegrafOptions = {};
-if (HTTPS_PROXY) {
-  telegrafOptions.telegram = { agent: new HttpsProxyAgent(HTTPS_PROXY) };
-  console.log(`[PROXY] Telegraf using proxy: ${HTTPS_PROXY}`);
+const aiConfig = providers.describeConfig();
+console.log(`[AI] active providers: ${aiConfig.active.join(', ') || '(none)'} | proxy: ${aiConfig.proxy}`);
+if (!aiConfig.active.length) {
+  console.warn('[AI] No API keys set (GROQ_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY) — analysis requests will fail until you add at least one.');
 }
-const bot = new Telegraf(TELEGRAM_BOT_TOKEN, telegrafOptions);
-const groqOptions = { apiKey: GROQ_API_KEY };
-if (HTTPS_PROXY) {
-  groqOptions.httpAgent = new HttpsProxyAgent(HTTPS_PROXY);
-  console.log(`[PROXY] Groq using proxy: ${HTTPS_PROXY}`);
+
+let bot;
+
+function createBot(useProxy) {
+  const options = {};
+  if (useProxy && HTTPS_PROXY) {
+    options.telegram = { agent: new HttpsProxyAgent(HTTPS_PROXY) };
+  }
+  const b = new Telegraf(TELEGRAM_BOT_TOKEN, options);
+  registerHandlers(b);
+  return b;
 }
-const groq = new Groq(groqOptions);
 
 const TARGET_GROUP_ID = String(TELEGRAM_GROUP_ID);
 const ADMIN_USER_ID = String(ADMIN_ID);
@@ -73,15 +78,8 @@ function buildSystemPrompt() {
   return template.replace('{{now}}', getTodayDate()).replace('{{TODAY}}', getTodayDate());
 }
 
-async function analyzeWithGemini(text) {
-  const completion = await groq.chat.completions.create({
-    model: AI_MODEL || 'llama-3.3-70b-versatile',
-    messages: [
-      { role: 'system', content: buildSystemPrompt() },
-      { role: 'user', content: text },
-    ],
-  });
-  return completion.choices[0].message.content;
+async function analyzeText(text) {
+  return providers.analyze({ systemPrompt: buildSystemPrompt(), userText: text });
 }
 
 function isAdmin(ctx) {
@@ -141,6 +139,8 @@ function formatUsersList(users) {
     })
     .join('\n');
 }
+
+function registerHandlers(bot) {
 
 // --- Admin command ---
 
@@ -276,9 +276,9 @@ async function analyzeGroupMessage(ctx, msg) {
   }
 
   try {
-    console.log(`[AI] Calling Gemini for INN=${inn}...`);
-    const reply = await analyzeWithGemini(text);
-    console.log(`[AI] Gemini OK, reply len=${reply.length}, preview=${reply.slice(0, 80)}`);
+    console.log(`[AI] Calling provider chain for INN=${inn}...`);
+    const { provider, route, text: reply } = await analyzeText(text);
+    console.log(`[AI] ${provider}/${route} OK, reply len=${reply.length}, preview=${reply.slice(0, 80)}`);
 
     const noBuyers = /покупател\w*\s+не\s+найден|не\s+найден\w*\s+покупател/i.test(reply);
     const firstLine = reply.split('\n').find((l) => l.trim()) || reply.slice(0, 80);
@@ -287,7 +287,7 @@ async function analyzeGroupMessage(ctx, msg) {
       type: noBuyers ? 'no_buyers' : 'found',
       inn,
       company,
-      summary: firstLine.slice(0, 100),
+      summary: `[${provider}/${route}] ${firstLine.slice(0, 90)}`,
     });
 
     console.log(`[REPLY] Sending reply to msg ${msg.message_id}...`);
@@ -396,6 +396,8 @@ bot.catch((err, ctx) => {
   console.error(`Error for update ${ctx?.update?.update_id}:`, err.message);
 });
 
+} // end registerHandlers
+
 // --- Incoming webhook from external bot ---
 
 async function sendToGroup(text, messageId) {
@@ -433,13 +435,13 @@ async function handleIncomingWebhook(text, messageId) {
   }
 
   try {
-    console.log(`[WEBHOOK/AI] Calling Gemini for INN=${inn}...`);
-    const reply = await analyzeWithGemini(text);
-    console.log(`[WEBHOOK/AI] Gemini OK, len=${reply.length}`);
+    console.log(`[WEBHOOK/AI] Calling provider chain for INN=${inn}...`);
+    const { provider, route, text: reply } = await analyzeText(text);
+    console.log(`[WEBHOOK/AI] ${provider}/${route} OK, len=${reply.length}`);
 
     const noBuyers = /покупател\w*\s+не\s+найден|не\s+найден\w*\s+покупател/i.test(reply);
     const firstLine = reply.split('\n').find((l) => l.trim()) || reply.slice(0, 80);
-    addLog({ type: noBuyers ? 'no_buyers' : 'found', inn, company, summary: firstLine.slice(0, 100) });
+    addLog({ type: noBuyers ? 'no_buyers' : 'found', inn, company, summary: `[${provider}/${route}] ${firstLine.slice(0, 90)}` });
 
     await sendToGroup(reply, messageId);
     try { db.incrementAnalyses(); } catch (e) { console.error(`[DB] incrementAnalyses: ${e.message}`); }
@@ -478,23 +480,39 @@ function startHttpServer() {
 
 // --- Launch ---
 
+async function tryLaunch(useProxy) {
+  bot = createBot(useProxy);
+  await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+  await bot.launch({ allowedUpdates: ['message', 'channel_post', 'callback_query'] });
+}
+
 async function startBot(retries = 10, delay = 3000) {
+  const modes = HTTPS_PROXY ? ['proxy', 'direct'] : ['direct'];
+  let lastErr;
   for (let i = 1; i <= retries; i++) {
-    try {
-      await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-      await bot.launch({ allowedUpdates: ['message', 'channel_post', 'callback_query'] });
-      console.log(`Bot started (attempt ${i}). Group: ${TARGET_GROUP_ID} | Admin: ${ADMIN_USER_ID}`);
-      return;
-    } catch (err) {
-      console.error(`Attempt ${i}/${retries} failed: ${err.message}`);
-      if (i < retries) {
-        const wait = delay * i;
-        console.log(`Waiting ${wait / 1000}s before retry...`);
-        await new Promise((r) => setTimeout(r, wait));
+    for (const mode of modes) {
+      try {
+        await tryLaunch(mode === 'proxy');
+        console.log(`[TG] Bot started via ${mode} (attempt ${i}). Group: ${TARGET_GROUP_ID} | Admin: ${ADMIN_USER_ID}`);
+        return;
+      } catch (err) {
+        lastErr = err;
+        const isNet = providers.isNetworkError(err);
+        console.error(`[TG] launch via ${mode} failed (attempt ${i}/${retries}): ${err.message}`);
+        if (mode === 'proxy' && isNet) {
+          console.warn('[TG] proxy unreachable, trying direct...');
+          continue;
+        }
+        break;
       }
     }
+    if (i < retries) {
+      const wait = delay * i;
+      console.log(`[TG] waiting ${wait / 1000}s before retry...`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
   }
-  console.error('All retry attempts exhausted. Exiting.');
+  console.error(`[TG] All retry attempts exhausted: ${lastErr?.message}. Exiting.`);
   process.exit(1);
 }
 
